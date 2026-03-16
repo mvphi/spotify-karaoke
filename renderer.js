@@ -127,11 +127,11 @@ function romanizeText(text) {
     if (isKorean(text) && window.hangulRomanization) {
       return window.hangulRomanization.convert(text);
     }
-    if (isChinese(text) && window.pinyinPro) {
-      return window.pinyinPro.convert(text);
-    }
     if (isJapanese(text) && window.wanakana) {
       return window.wanakana.toRomaji(text);
+    }
+    if (isChinese(text) && window.pinyinPro) {
+      return window.pinyinPro.convert(text);
     }
     return window.transliteration?.transliterate(text) ?? null;
   } catch {
@@ -181,6 +181,18 @@ async function fetchLyrics(track) {
   return null;
 }
 
+async function preRomanizeJapanese(lines) {
+  if (!window.kuroshiro) return;
+  const japanese = lines.filter((l) => l.text && isJapanese(l.text));
+  if (!japanese.length) return;
+  await Promise.all(japanese.map(async (line) => {
+    try {
+      const roma = await window.kuroshiro.convert(line.text);
+      if (roma && roma !== line.text) line.romanized = roma;
+    } catch {}
+  }));
+}
+
 let activeLineIndex = -1;
 let lyricsTopSpacer = null;
 let lyricsBottomSpacer = null;
@@ -219,7 +231,7 @@ function renderLyrics(message) {
       lineEl.dataset.index = index;
       if (lyricsMode === "synced") lineEl.dataset.start = line.start;
       if (hasNonLatin(line.text)) {
-        const roma = romanizeText(line.text);
+        const roma = line.romanized ?? romanizeText(line.text);
         if (roma && roma !== line.text) {
           lineEl.appendChild(document.createTextNode(line.text));
           const romaSpan = document.createElement("span");
@@ -397,7 +409,8 @@ function applyPlayerState(state) {
       lyrics = [];
       lyricsMode = "none";
       renderLyrics("Loading lyrics…");
-      fetchLyrics(track).then((fetched) => {
+      fetchLyrics(track).then(async (fetched) => {
+        if (fetched) await preRomanizeJapanese(fetched.lines);
         lyrics = fetched?.lines || [];
         lyricsMode = fetched ? (fetched.synced ? "synced" : "static") : "none";
         renderLyrics(fetched ? null : "No lyrics found for this track");
@@ -470,7 +483,8 @@ async function pollCurrentlyPlaying() {
       lyrics = [];
       lyricsMode = "none";
       renderLyrics("Loading lyrics…");
-      fetchLyrics(track).then((fetched) => {
+      fetchLyrics(track).then(async (fetched) => {
+        if (fetched) await preRomanizeJapanese(fetched.lines);
         lyrics = fetched?.lines || [];
         lyricsMode = fetched ? (fetched.synced ? "synced" : "static") : "none";
         renderLyrics(fetched ? null : "No lyrics found for this track");

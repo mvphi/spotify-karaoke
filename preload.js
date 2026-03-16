@@ -1,12 +1,24 @@
 const { contextBridge, ipcRenderer } = require("electron");
 const { convert: hangulConvert } = require("hangul-romanization");
 const { pinyin } = require("pinyin-pro");
+const Kuroshiro = require("kuroshiro").default;
+const KuromojiAnalyzer = require("kuroshiro-analyzer-kuromoji");
+
+const kuroshiro = new Kuroshiro();
+const kuroshiroReady = kuroshiro.init(new KuromojiAnalyzer());
 
 contextBridge.exposeInMainWorld("spotify", {
   login: () => ipcRenderer.invoke("login"),
   getToken: () => ipcRenderer.invoke("get-token"),
   onTokenReady: (cb) => ipcRenderer.on("token-ready", (_e, token) => cb(token)),
   onTokenRefreshed: (cb) => ipcRenderer.on("token-refreshed", (_e, token) => cb(token)),
+});
+
+contextBridge.exposeInMainWorld("kuroshiro", {
+  convert: async (text) => {
+    await kuroshiroReady;
+    return kuroshiro.convert(text, { to: "romaji", mode: "spaced" });
+  },
 });
 
 contextBridge.exposeInMainWorld("hangulRomanization", {
