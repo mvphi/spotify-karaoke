@@ -1,10 +1,24 @@
 const { contextBridge, ipcRenderer } = require("electron");
+const { convert: hangulConvert } = require("hangul-romanization");
+const { pinyin } = require("pinyin-pro");
 
 contextBridge.exposeInMainWorld("spotify", {
   login: () => ipcRenderer.invoke("login"),
   getToken: () => ipcRenderer.invoke("get-token"),
   onTokenReady: (cb) => ipcRenderer.on("token-ready", (_e, token) => cb(token)),
   onTokenRefreshed: (cb) => ipcRenderer.on("token-refreshed", (_e, token) => cb(token)),
+});
+
+contextBridge.exposeInMainWorld("hangulRomanization", {
+  convert: (text) => hangulConvert(text),
+});
+
+contextBridge.exposeInMainWorld("pinyinPro", {
+  convert: (text) => pinyin(text, { toneType: "symbol", type: "string" }),
+});
+
+contextBridge.exposeInMainWorld("genius", {
+  fetchLyrics: (artist, title) => ipcRenderer.invoke("fetch-genius-lyrics", artist, title),
 });
 
 contextBridge.exposeInMainWorld("electronWindow", {

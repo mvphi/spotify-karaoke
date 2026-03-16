@@ -13,6 +13,8 @@
     "electron": "^41.0.2"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "hangul-romanization": "^1.0.1",
+    "pinyin-pro": "^3.28.0"
   }
 }

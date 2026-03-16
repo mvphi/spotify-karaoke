@@ -50,7 +50,7 @@ function updateMarquee() {
     const firstSpan = titleEl.querySelector(".marquee-text");
     if (!inner || !firstSpan) return;
     // offsetWidth gives exact px width of one copy (incl. padding), independent of parent overflow
-    const oneUnit = firstSpan.offsetWidth;
+    const oneUnit = firstSpan.getBoundingClientRect().width;
     titleEl.style.setProperty("--marquee-offset", `-${oneUnit}px`);
     titleEl.style.setProperty("--marquee-duration", `${duration}s`);
     // Restart animation so it picks up the new custom property values
@@ -76,7 +76,7 @@ new ResizeObserver(updateMarquee).observe(titleEl);
 let spotifyPlayer = null;
 let deviceId = null;
 let playerState = null;
-let progressInterval = null;
+let progressRafId = null;
 let positionAtLastSync = 0;
 let lastSyncedAt = 0;
 let isPlaying = false;
@@ -102,6 +102,7 @@ function formatTime(seconds) {
 
 // ── Lyrics ───────────────────────────────────────────────────────────────────
 let lyrics = [];
+let lyricsMode = "none"; // "synced" | "static" | "none"
 let currentTrackId = null;
 
 // ── Romanization ──────────────────────────────────────────────────────────────
@@ -110,14 +111,26 @@ function hasNonLatin(text) {
 }
 
 function isJapanese(text) {
-  // Hiragana or katakana present → treat as Japanese
   return /[\u3040-\u30FF]/.test(text);
+}
+
+function isKorean(text) {
+  return /[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(text);
+}
+
+function isChinese(text) {
+  return /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(text);
 }
 
 function romanizeText(text) {
   try {
+    if (isKorean(text) && window.hangulRomanization) {
+      return window.hangulRomanization.convert(text);
+    }
+    if (isChinese(text) && window.pinyinPro) {
+      return window.pinyinPro.convert(text);
+    }
     if (isJapanese(text) && window.wanakana) {
-      // wanakana correctly romanizes kana; kanji are left as-is (better than wrong pinyin)
       return window.wanakana.toRomaji(text);
     }
     return window.transliteration?.transliterate(text) ?? null;
@@ -146,15 +159,26 @@ async function fetchLyrics(track) {
   const album    = track.album?.name || "";
   const duration = Math.round(track.duration_ms / 1000);
 
+  // Try lrclib first (synced)
   const params = new URLSearchParams({ artist_name: artist, track_name: title, album_name: album, duration });
   try {
     const res  = await fetch(`https://lrclib.net/api/get?${params}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.syncedLyrics ? parseLrc(data.syncedLyrics) : null;
-  } catch {
-    return null;
-  }
+    if (res.ok) {
+      const data = await res.json();
+      if (data.syncedLyrics) return { lines: parseLrc(data.syncedLyrics), synced: true };
+    }
+  } catch {}
+
+  // Fallback: Genius (unsynced plain text)
+  try {
+    const text = await window.genius.fetchLyrics(artist, title);
+    if (text) {
+      const lines = text.split("\n").map((t) => ({ text: t, start: null }));
+      return { lines, synced: false };
+    }
+  } catch {}
+
+  return null;
 }
 
 let activeLineIndex = -1;
@@ -182,11 +206,18 @@ function renderLyrics(message) {
     msg.textContent = message || "No lyrics found";
     lyricsEl.appendChild(msg);
   } else {
+    if (lyricsMode === "static") {
+      const notice = document.createElement("div");
+      notice.className = "line is-upcoming lyrics-sync-notice";
+      notice.textContent = "Timestamp sync not available";
+      lyricsEl.appendChild(notice);
+    }
+
     lyrics.forEach((line, index) => {
       const lineEl = document.createElement("div");
       lineEl.className = "line is-upcoming";
       lineEl.dataset.index = index;
-      lineEl.dataset.start = line.start;
+      if (lyricsMode === "synced") lineEl.dataset.start = line.start;
       if (hasNonLatin(line.text)) {
         const roma = romanizeText(line.text);
         if (roma && roma !== line.text) {
@@ -201,11 +232,13 @@ function renderLyrics(message) {
       } else {
         lineEl.textContent = line.text;
       }
-      lineEl.addEventListener("click", () => {
-        const posMs = Math.floor(line.start * 1000);
-        syncPosition(posMs, isPlaying);
-        spotifyFetch(`/me/player/seek?position_ms=${posMs}`, { method: "PUT" });
-      });
+      if (lyricsMode === "synced") {
+        lineEl.addEventListener("click", () => {
+          const posMs = Math.floor(line.start * 1000);
+          syncPosition(posMs, isPlaying);
+          spotifyFetch(`/me/player/seek?position_ms=${posMs}`, { method: "PUT" });
+        });
+      }
       lyricsEl.appendChild(lineEl);
     });
   }
@@ -215,10 +248,11 @@ function renderLyrics(message) {
   lyricsEl.appendChild(lyricsBottomSpacer);
 
   updateLyricsSpacers();
-  lyricsEl.scrollTop = 0;
+  lyricsEl.scrollTo({ top: 0, behavior: "instant" });
 }
 
 function updateLyrics() {
+  if (lyricsMode !== "synced") return;
   const t = getSimulatedPosition() / 1000;
   const dur = simulatedDuration / 1000 || 1;
   const lines = Array.from(lyricsEl.querySelectorAll(".line"));
@@ -261,10 +295,12 @@ function updateProgress() {
 }
 
 function startProgressTick() {
-  clearInterval(progressInterval);
-  progressInterval = setInterval(() => {
+  if (progressRafId) cancelAnimationFrame(progressRafId);
+  function tick() {
     updateProgress();
-  }, 250);
+    progressRafId = requestAnimationFrame(tick);
+  }
+  progressRafId = requestAnimationFrame(tick);
 }
 
 const artImg = document.querySelector(".art-panel img");
@@ -359,9 +395,11 @@ function applyPlayerState(state) {
     if (track.id !== currentTrackId) {
       currentTrackId = track.id;
       lyrics = [];
+      lyricsMode = "none";
       renderLyrics("Loading lyrics…");
       fetchLyrics(track).then((fetched) => {
-        lyrics = fetched || [];
+        lyrics = fetched?.lines || [];
+        lyricsMode = fetched ? (fetched.synced ? "synced" : "static") : "none";
         renderLyrics(fetched ? null : "No lyrics found for this track");
       });
       checkIfLiked(track.id);
@@ -430,9 +468,11 @@ async function pollCurrentlyPlaying() {
     if (track.id !== currentTrackId) {
       currentTrackId = track.id;
       lyrics = [];
+      lyricsMode = "none";
       renderLyrics("Loading lyrics…");
       fetchLyrics(track).then((fetched) => {
-        lyrics = fetched || [];
+        lyrics = fetched?.lines || [];
+        lyricsMode = fetched ? (fetched.synced ? "synced" : "static") : "none";
         renderLyrics(fetched ? null : "No lyrics found for this track");
       });
       checkIfLiked(track.id);

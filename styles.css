@@ -138,7 +138,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px 0 8px;
+  padding: 0 8px;
   flex-shrink: 0;
   cursor: grab;
   user-select: none;
@@ -264,8 +264,18 @@ body {
 }
 
 .lyrics::-webkit-scrollbar        { width: 4px; }
-.lyrics::-webkit-scrollbar-track  { background: transparent; margin-top: 16px; margin-bottom: 16px; }
+.lyrics::-webkit-scrollbar-track  { background: transparent; }
 .lyrics::-webkit-scrollbar-thumb  { background: rgba(255,255,255,0.18); border-radius: 99px; }
+
+.player-card.karaoke-on .lyrics {
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.player-card.karaoke-on:hover .lyrics {
+  margin-top: 0;
+  margin-bottom: 0;
+}
 
 .lyrics-spacer { flex-shrink: 0; }
 
@@ -297,6 +307,26 @@ body {
   font-weight: 400;
   font-size: 1rem;
   color: #fff;
+}
+
+.lyrics-sync-notice {
+  cursor: default;
+  font-size: 0.75rem;
+  font-weight: 500;
+  opacity: 0.45;
+  color: #fff;
+  letter-spacing: 0.03em;
+  margin-bottom: 8px;
+}
+
+.player-card.karaoke-on .lyrics-sync-notice,
+.player-card.karaoke-on .lyrics-message {
+  margin-top: 10px;
+}
+
+.player-card.karaoke-on:hover .lyrics-sync-notice,
+.player-card.karaoke-on:hover .lyrics-message {
+  margin-top: 0;
 }
 
 .line-romanized {
